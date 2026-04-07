@@ -1,12 +1,13 @@
-# BLE Proxy — ESP32 Bluetooth Proxy pre Home Assistant
+# BLE Proxy + PIR — ESP32 multisenzor pre Home Assistant
 
-Rozšírenie BLE dosahu pre Shelly BLU H&T senzory pomocou ESP32 s ESPHome.
+BLE proxy, PIR pohybový senzor a voliteľný senzor osvetlenia v jednej inštalačnej krabici.
+Zabudované v Legrand Valena Life rámčeku (zaslepovacia pozícia).
 
 ---
 
 ## Prečo
 
-RPi4 má vstavaný BT adaptér (bcm43438) s dosahom ~10-15m. Vzdialené BLU H&T senzory majú slabý signál:
+**BLE dosah:** RPi4 má vstavaný BT adaptér (bcm43438) s dosahom ~10-15m. Vzdialené BLU H&T senzory majú slabý signál:
 
 | Zariadenie | Signál cez RPi4 |
 |------------|-----------------|
@@ -14,7 +15,9 @@ RPi4 má vstavaný BT adaptér (bcm43438) s dosahom ~10-15m. Vzdialené BLU H&T 
 | H&T / Druhé poschodie | -87 dBm (slabý) |
 | H&T / BLU H&T 0002 | -90 dBm (veľmi slabý) |
 
-ESP32 BLE proxy na 2. poschodí vyrieši pokrytie pre vzdialené senzory.
+**Pohybový senzor:** V kúpeľni nie je žiadny senzor pohybu — automatické zapínanie svetla pri vstupe.
+
+**Riešenie:** ESP32 s BLE proxy + PIR senzor v jednej krabici, schované v Legrand Valena Life rámčeku.
 
 ---
 
@@ -22,56 +25,89 @@ ESP32 BLE proxy na 2. poschodí vyrieši pokrytie pre vzdialené senzory.
 
 ### Čo treba kúpiť
 
-| Komponent | Model | Cena (~) | Odkiaľ |
-|-----------|-------|----------|--------|
-| ESP32 doska | M5Stack ATOM Lite | ~8€ | AliExpress |
-| AC/DC zdroj | Hi-Link HLK-PM01 (230V AC → 5V DC, 3W) | ~4€ | AliExpress |
+| Komponent | Model | Cena (~) | Poznámka |
+|-----------|-------|----------|----------|
+| ESP32 doska | M5Stack ATOM Lite | ~8€ | ESP32, WiFi + BLE, USB-C, 24×24mm |
+| AC/DC zdroj | Hi-Link HLK-PM01 | ~4€ | 230V AC → 5V DC, 3W |
+| PIR senzor | AM312 | ~1€ | 2.7-12V, 10×10mm, dosah 3-5m |
+| Senzor osvetlenia | BH1750 (voliteľné) | ~2€ | I2C, meranie lux |
+| Rámček | Legrand Valena Life | — | Zaslepovacia pozícia pre PIR |
 
-### Voliteľné
+### Príslušenstvo
 
-- Scvrkávacia bužírka na izoláciu spojov
-- Wago svorky na pripojenie 230V v krabici
+- Wago svorky (pripojenie 230V)
+- Scvrkávacia bužírka (izolácia 5V spojov)
+- Krátke vodiče na prepojenie
 
 ### Náradia
 
-- Spájkovačka + cín (prepojenie Hi-Link → ATOM)
+- Spájkovačka + cín (prepojenie Hi-Link → ATOM → AM312)
 - Skúšačka / multimeter
 
 ---
 
-## Zapojenie v inštalačnej krabici
+## Fyzická inštalácia
+
+### Umiestnenie v Legrand Valena Life rámčeku
 
 ```
-┌─────────────────────────────────────┐
-│  Inštalačná krabica (230V)          │
-│                                     │
-│  L (fáza) ───┐                      │
-│               │  ┌──────────┐       │
-│               ├──┤ Hi-Link  │       │
-│               │  │ HLK-PM01 │       │
-│  N (nulák) ──┘  │          │       │
-│                  │ 230V→5V  │       │
-│                  └──┬───┬───┘       │
-│                     │   │           │
-│                   +5V  GND          │
-│                     │   │           │
-│                  ┌──┴───┴───┐       │
-│                  │  M5Stack │       │
-│                  │ ATOM Lite│       │
-│                  │          │       │
-│                  │ (WiFi+BLE│       │
-│                  │  proxy)  │       │
-│                  └──────────┘       │
-│                                     │
-└─────────────────────────────────────┘
+┌─────────────────────────────┐
+│  Legrand Valena Life rámček │
+│                             │
+│  ┌───────┐    ┌───────┐    │
+│  │Vypínač│    │Zaslepka│    │
+│  │svetla │    │+ PIR   │    │
+│  │       │    │ (otvor)│    │
+│  └───────┘    └───────┘    │
+│                             │
+│  Za stenou:   Za stenou:    │
+│  Shelly 1     Hi-Link       │
+│  Mini Gen3    ATOM Lite     │
+│               AM312         │
+└─────────────────────────────┘
 ```
 
-### Prepojenie Hi-Link → ATOM Lite
+PIR senzor (AM312) sa schová za malý otvor v zaslepovacom kryte — senzor je len 10×10mm.
+Fáza + nulák sa berú z rovnakého prívodu ako svetlo.
 
-| Hi-Link výstup | ATOM Lite pin |
-|-----------------|---------------|
-| +Vo (5V) | 5V pin (Grove port alebo pájacie body) |
-| -Vo (GND) | GND pin |
+### Zapojenie v inštalačnej krabici
+
+```
+┌──────────────────────────────────────────┐
+│  Inštalačná krabica (230V)               │
+│                                          │
+│  L (fáza) ──┬──── Shelly 1 Mini Gen3    │
+│              │     (svetlo kúpeľňa)      │
+│              │                           │
+│              │  ┌──────────┐             │
+│              ├──┤ Hi-Link  │             │
+│              │  │ HLK-PM01 │             │
+│  N (nulák) ─┤  │ 230V→5V  │             │
+│              │  └──┬───┬───┘             │
+│              │     │   │                 │
+│              │   +5V  GND                │
+│              │     │   │                 │
+│              │  ┌──┴───┴───┐   ┌──────┐ │
+│              │  │ ATOM Lite│───┤AM312 │ │
+│              │  │          │   │ PIR  │ │
+│              │  │ BLE proxy│   └──────┘ │
+│              │  │ + PIR    │             │
+│              │  └──────────┘             │
+│              │                           │
+└──────────────────────────────────────────┘
+```
+
+### Prepojenie
+
+| Zdroj | Cieľ | Pin |
+|-------|------|-----|
+| Hi-Link +Vo (5V) | ATOM Lite | 5V |
+| Hi-Link -Vo (GND) | ATOM Lite | GND |
+| ATOM Lite 3.3V | AM312 | VCC |
+| ATOM Lite GND | AM312 | GND |
+| AM312 OUT | ATOM Lite | GPIO32 |
+| ATOM Lite GPIO25 (voliteľné) | BH1750 SDA | SDA |
+| ATOM Lite GPIO21 (voliteľné) | BH1750 SCL | SCL |
 
 ### Bezpečnostné upozornenia
 
@@ -97,8 +133,8 @@ Pripojiť ATOM Lite cez USB-C k počítaču a flashnúť cez ESPHome dashboard a
 
 ```yaml
 esphome:
-  name: ble-proxy-2p
-  friendly_name: "BLE Proxy / 2. poschodie"
+  name: ble-proxy-kupelna
+  friendly_name: "BLE Proxy / Kúpeľňa"
 
 esp32:
   board: m5stack-atom
@@ -109,14 +145,13 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
 
-  # Statická IP (voliteľné, odporúčané)
   manual_ip:
     static_ip: 192.168.88.250
     gateway: 192.168.88.1
     subnet: 255.255.255.0
 
   ap:
-    ssid: "BLE-Proxy-2P"
+    ssid: "BLE-Proxy-Kupelna"
     password: "fallback123"
 
 captive_portal:
@@ -131,6 +166,7 @@ ota:
   - platform: esphome
     password: !secret ota_password
 
+# BLE proxy pre Shelly BLU H&T
 bluetooth_proxy:
   active: true
 
@@ -139,6 +175,28 @@ esp32_ble_tracker:
     active: true
     interval: 1100ms
     window: 1100ms
+
+# PIR pohybový senzor (AM312 na GPIO32)
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO32
+      mode: INPUT_PULLDOWN
+    name: "Kúpeľňa pohyb"
+    device_class: motion
+    filters:
+      - delayed_off: 30s
+
+# Voliteľné: senzor osvetlenia (BH1750 cez I2C)
+# i2c:
+#   sda: GPIO25
+#   scl: GPIO21
+#
+# sensor:
+#   - platform: bh1750
+#     name: "Kúpeľňa osvetlenie"
+#     address: 0x23
+#     update_interval: 10s
 ```
 
 ### 4. Po flashnutí
@@ -150,18 +208,59 @@ esp32_ble_tracker:
 
 ---
 
+## Automatizácia — svetlo v kúpeľni
+
+Po inštalácii pridať do `/config/packages/kupelna_pohyb.yaml`:
+
+```yaml
+automation:
+  - id: kupelna_svetlo_zapnut
+    alias: "Kúpeľňa / Svetlo zapnúť pri pohybe"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.kupelna_pohyb
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: light.svetlo_kupelna
+        state: "off"
+    actions:
+      - action: light.turn_on
+        target:
+          entity_id: light.svetlo_kupelna
+
+  - id: kupelna_svetlo_vypnut
+    alias: "Kúpeľňa / Svetlo vypnúť bez pohybu"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.kupelna_pohyb
+        to: "off"
+        for:
+          minutes: 5
+    actions:
+      - action: light.turn_off
+        target:
+          entity_id: light.svetlo_kupelna
+```
+
+> **Poznámka:** `light.svetlo_kupelna` ešte neexistuje — pridať keď bude Shelly 1 Mini Gen3 nainštalovaný.
+
+---
+
 ## Po inštalácii
 
 ### Overenie v HA
 
 - **Settings → Devices & Services → ESPHome** — zariadenie online
-- **Settings → Devices & Services → Bluetooth** — nový adaptér "BLE Proxy / 2. poschodie"
-- Signál vzdialených BLU H&T by sa mal zlepšiť (bližšie k -50/-60 dBm)
+- **Settings → Devices & Services → Bluetooth** — nový adaptér "BLE Proxy / Kúpeľňa"
+- **binary_sensor.kupelna_pohyb** — testovať mávnutím pred PIR
+- Signál H&T / Spodná kúpeľňa by sa mal zlepšiť (bližšie k -50/-60 dBm)
 
 ### Overenie cez CLI
 
 ```bash
 ha-api search ble_proxy
+ha-api search kupelna_pohyb
 ha-ws device list esphome
 ```
 
@@ -169,10 +268,14 @@ ha-ws device list esphome
 
 ## Umiestnenie
 
-ESP32 umiestniť na 2. poschodie — pokryje:
-- Detská izba sever (H&T / Druhé poschodie — aktuálne -87 dBm)
-- Detská izba juhozápad (H&T / Detská izba juhozápad)
-- Spálňa
-- Chodba 2P
+### Kúpeľňa (primárne)
 
-Optimálne umiestnenie: centrálne na 2. poschodí (napr. chodba).
+Spodná kúpeľňa — Legrand Valena Life rámček vedľa vypínača svetla:
+- BLE proxy pre H&T / Spodná kúpeľňa
+- PIR pre automatické svetlo
+
+### Ďalšie možné umiestnenia (budúcnosť)
+
+Rovnaký setup sa dá replikovať:
+- **2. poschodie / Chodba** — pokrytie detských izieb (H&T -87 dBm) + svetlo na chodbe
+- **Zádverie** — automatické svetlo pri príchode
