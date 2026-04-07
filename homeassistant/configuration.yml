@@ -1,0 +1,257 @@
+# =============================================================================
+# Home Assistant - configuration.yaml
+# =============================================================================
+
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+homeassistant:
+  packages:
+    energie_faktury: !include packages/energie_faktury.yaml
+
+# =============================================================================
+# HTTP - needed for Nginx Proxy Manager
+# =============================================================================
+http:
+  use_x_forwarded_for: true
+  trusted_proxies:
+    - 172.16.0.0/12
+
+# =============================================================================
+# InfluxDB
+# =============================================================================
+influxdb:
+
+# =============================================================================
+# Sensors (REST / platform-based)
+# =============================================================================
+sensor:
+
+  # ---------- Power outages --------------------------------------------------
+  - platform: power_outages
+
+  # ---------- SPP - cena plynu -----------------------------------------------
+  - platform: rest
+    unique_id: cena_plyn_kwh_scrape
+    name: "Cena Plyn"
+    resource: "https://www.spp.sk/wp-json/spp/v1/price-list/active/0?_locale=user"
+    value_template: '{{ value_json.result.rates.1.sop | replace(",", ".") | float }}'
+    unit_of_measurement: "€/kWh"
+
+  # ---------- Open-Meteo - predpoveď počasia (každých 15 min) ----------------
+  # Zdroj: open-meteo.com (zadarmo, bez API kľúča)
+  # Obsahuje: rýchlosť vetra, poryvy, smer, teplota
+  - platform: rest
+    name: "Open Meteo"
+    resource: "https://api.open-meteo.com/v1/forecast?latitude=48.733&longitude=21.585&current=wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m&wind_speed_unit=kmh&timezone=Europe/Bratislava"
+    scan_interval: 900
+    value_template: "OK"
+    json_attributes:
+      - current
+
+  # ---------- METAR LZKZ - reálne merania letisko Košice (každých 30 min) ----
+  # Zdroj: aviationweather.gov (zadarmo, bez API kľúča)
+  # Meranie: priemer 10 min, aktualizácia každých 30 min
+  # Vzdialenosť: ~10 km od domu
+  - platform: rest
+    name: "METAR LZKZ"
+    resource: "https://aviationweather.gov/api/data/metar?ids=LZKZ&format=json&hours=1"
+    scan_interval: 1800
+    value_template: "{{ value_json[0].rawOb }}"
+    json_attributes_path: "$[0]"
+    json_attributes:
+      - wspd       # rýchlosť vetra v uzloch (kt)
+      - wdir       # smer vetra v stupňoch
+      - temp       # teplota v °C
+      - dewp       # teplota rosného bodu v °C
+      - altim      # tlak QNH v hPa
+      - reportTime # čas správy (UTC)
+      - rawOb      # raw METAR správa
+
+# =============================================================================
+# Template senzory a binárne senzory
+# =============================================================================
+template:
+
+  # ---------- Binárne senzory ------------------------------------------------
+  - binary_sensor:
+
+      - name: "Plynový kotol"
+        unique_id: plynovy_kotol_stav
+        device_class: running
+        icon: mdi:fire
+        availability: >
+          {{ states('sensor.shellypmminig3_5432045d1f18_power') not in ['unknown', 'unavailable'] }}
+        state: >
+          {{ states('sensor.shellypmminig3_5432045d1f18_power') | float(0) > 50 }}
+
+      - name: "Kotol má aktívnu chybu"
+        unique_id: kotol_aktivna_chyba
+        device_class: problem
+        availability: >
+          {{ states('sensor.ems_esp_boiler_last_error_code') not in ['unknown', 'unavailable'] }}
+        state: >
+          {% set err = states('sensor.ems_esp_boiler_last_error_code') %}
+          {{ err not in ['unknown', 'unavailable'] and 'now' in err }}
+        icon: >
+          {{ 'mdi:alert' if this.state == 'on' else 'mdi:check-circle' }}
+
+      - name: "Kotol kritická chyba"
+        unique_id: kotol_kriticka_chyba
+        device_class: problem
+        availability: >
+          {{ states('sensor.ems_esp_boiler_last_error_code') not in ['unknown', 'unavailable'] }}
+        state: >
+          {% set err = states('sensor.ems_esp_boiler_last_error_code') %}
+          {{ err not in ['unknown', 'unavailable'] and 'now' in err and '2927' in err }}
+        icon: >
+          {{ 'mdi:fire-alert' if this.state == 'on' else 'mdi:fire-check' }}
+
+  # ---------- Senzory --------------------------------------------------------
+  - sensor:
+
+      # -- Kotol --------------------------------------------------------------
+      - name: "Kotol aktuálny error kód"
+        unique_id: kotol_aktualny_error_kod
+        state: >
+          {% set err = states('sensor.ems_esp_boiler_last_error_code') %}
+          {% if err in ['unknown', 'unavailable'] %}
+            Senzor nedostupný
+          {% elif 'now' not in err %}
+            Systém v poriadku
+          {% elif '2927' in err %}
+            KRITICKÉ! ZLYHANIE PLAMEŇA
+          {% elif '2971' in err %}
+            NÍZKY TLAK - Skontrolujte tlakomer!
+          {% else %}
+            Aktívna chyba: {{ err }}
+          {% endif %}
+        icon: >
+          {% set err = states('sensor.ems_esp_boiler_last_error_code') %}
+          {% if err in ['unknown', 'unavailable'] or 'now' not in err %}
+            mdi:check-circle
+          {% elif '2927' in err %}
+            mdi:fire-alert
+          {% elif '2971' in err %}
+            mdi:gauge-low
+          {% else %}
+            mdi:alert
+          {% endif %}
+
+      # -- Open-Meteo - predpoveď vetra a teploty ----------------------------
+      - name: "Vietor / Rýchlosť"
+        unique_id: open_meteo_wind_speed
+        state: "{{ state_attr('sensor.open_meteo', 'current').wind_speed_10m }}"
+        unit_of_measurement: "km/h"
+        device_class: wind_speed
+        state_class: measurement
+        icon: mdi:weather-windy
+
+      - name: "Vietor / Poryvy"
+        unique_id: open_meteo_wind_gusts
+        state: "{{ state_attr('sensor.open_meteo', 'current').wind_gusts_10m }}"
+        unit_of_measurement: "km/h"
+        device_class: wind_speed
+        state_class: measurement
+        icon: mdi:weather-windy-variant
+
+      - name: "Vietor / Smer"
+        unique_id: open_meteo_wind_direction
+        state: "{{ state_attr('sensor.open_meteo', 'current').wind_direction_10m }}"
+        unit_of_measurement: "°"
+        icon: mdi:compass-outline
+
+      - name: "Teplota / Vonku"
+        unique_id: open_meteo_temperature
+        state: "{{ state_attr('sensor.open_meteo', 'current').temperature_2m }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer
+
+      # -- Plyn - konverzia kWh → m³ (1 m³ = 10.55 kWh) ---------------------
+      - name: "Plyn dnes m³"
+        unique_id: plyn_dnes_m3
+        state: "{{ (states('sensor.plyn_dnes_kwh') | float(0) / 10.55) | round(2) }}"
+        unit_of_measurement: "m³"
+        state_class: measurement
+        icon: mdi:meter-gas
+
+      - name: "Plyn tento mesiac m³"
+        unique_id: plyn_mesiac_m3
+        state: "{{ (states('sensor.plyn_mesiac_kwh') | float(0) / 10.55) | round(2) }}"
+        unit_of_measurement: "m³"
+        state_class: measurement
+        icon: mdi:meter-gas
+
+      - name: "Plyn tento rok m³"
+        unique_id: plyn_rok_m3
+        state: "{{ (states('sensor.plyn_rok_kwh') | float(0) / 10.55) | round(1) }}"
+        unit_of_measurement: "m³"
+        state_class: measurement
+        icon: mdi:meter-gas
+
+      # -- METAR LZKZ - reálne merania z letiska ------------------------------
+      - name: "METAR / Rýchlosť vetra"
+        unique_id: metar_wind_speed_kmh
+        state: "{{ (state_attr('sensor.metar_lzkz', 'wspd') | float(0) * 1.852) | round(1) }}"
+        unit_of_measurement: "km/h"
+        device_class: wind_speed
+        state_class: measurement
+        icon: mdi:weather-windy
+
+      - name: "METAR / Smer vetra"
+        unique_id: metar_wind_direction
+        state: "{{ state_attr('sensor.metar_lzkz', 'wdir') | int(0) }}"
+        unit_of_measurement: "°"
+        icon: mdi:compass-outline
+
+      - name: "METAR / Teplota"
+        unique_id: metar_temperature
+        state: "{{ state_attr('sensor.metar_lzkz', 'temp') | float(0) }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+        icon: mdi:thermometer
+
+# =============================================================================
+# Utility meter - meranie spotreby
+# =============================================================================
+utility_meter:
+
+  # Plyn (zdroj: EMS-ESP boiler - celková energia v kWh)
+  # Poznámka: pri prvom spustení je potrebné manuálne resetovať cez HA UI
+  plyn_dnes_kwh:
+    source: sensor.boiler_nrgtotal
+    name: "Plyn dnes kWh"
+    cycle: daily
+  plyn_mesiac_kwh:
+    source: sensor.boiler_nrgtotal
+    name: "Plyn tento mesiac kWh"
+    cycle: monthly
+  plyn_rok_kwh:
+    source: sensor.boiler_nrgtotal
+    name: "Plyn tento rok kWh"
+    cycle: yearly
+
+  # Elektrina (zdroj: Shelly Pro 3EM - celková aktívna energia v kWh)
+  elektrina_dnes:
+    source: sensor.shellypro3em_2cbcbba643a4_total_active_energy
+    name: "Elektrina dnes kWh"
+    cycle: daily
+  elektrina_mesiac:
+    source: sensor.shellypro3em_2cbcbba643a4_total_active_energy
+    name: "Elektrina tento mesiac kWh"
+    cycle: monthly
+  elektrina_rok:
+    source: sensor.shellypro3em_2cbcbba643a4_total_active_energy
+    name: "Elektrina tento rok kWh"
+    cycle: yearly

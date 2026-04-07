@@ -1,0 +1,228 @@
+# =============================================================================
+# Energie - história faktúr a ceny
+# =============================================================================
+# Súbor: /config/packages/energie_faktury.yaml
+#
+# Obsahuje:
+# - Históriu vyúčtovacích faktúr (manuálne zadávané po každom vyúčtovaní)
+# - Aktuálne ceny energií (aktualizovať po každej faktúre)
+# - Senzory odhadovaných nákladov v EUR
+# - Notifikáciu pred blížiacim sa vyúčtovaním (každý rok ~16. septembra)
+# =============================================================================
+
+# =============================================================================
+# Ceny energií (aktualizovať ručne po každej faktúre)
+# =============================================================================
+input_number:
+
+  # Plyn - variabilná cena za kWh (aktuálna tarifa VSE s DPH)
+  cena_plyn_kwh:
+    name: "Cena plynu €/kWh"
+    min: 0.01
+    max: 0.20
+    step: 0.0001
+    unit_of_measurement: "€/kWh"
+    icon: mdi:currency-eur
+    initial: 0.0351
+
+  # Plyn - fixná mesačná platba za odberné miesto (s DPH)
+  cena_plyn_fixna_mesiac:
+    name: "Plyn fixná platba €/mesiac"
+    min: 0
+    max: 20
+    step: 0.01
+    unit_of_measurement: "€/mes"
+    icon: mdi:currency-eur
+    initial: 1.845
+
+  # Elektrina - celková cena za kWh VT vrátane distribúcie a regulovaných poplatkov (s DPH)
+  # Faktúra 2024 (DPH 20%): 920 kWh = 246.56 € → 0.268 €/kWh
+  # Od 1.1.2025 DPH zmenené na 23% → prepočítané: 0.268 / 1.20 * 1.23 = 0.275 €/kWh
+  # Aktualizovať po príchode novej faktúry (september 2026)
+  cena_elektrina_kwh:
+    name: "Cena elektriny €/kWh"
+    min: 0.05
+    max: 0.50
+    step: 0.0001
+    unit_of_measurement: "€/kWh"
+    icon: mdi:currency-eur
+    initial: 0.275
+
+  # Elektrina - fixná mesačná platba za odberné miesto (s DPH)
+  cena_elektrina_fixna_mesiac:
+    name: "Elektrina fixná platba €/mesiac"
+    min: 0
+    max: 20
+    step: 0.01
+    unit_of_measurement: "€/mes"
+    icon: mdi:currency-eur
+    initial: 1.785
+
+# =============================================================================
+# História vyúčtovacích faktúr (manuálne zadávané)
+# =============================================================================
+input_text:
+
+  # --- Posledná faktúra za PLYN ---
+  faktura_plyn_obdobie:
+    name: "Faktúra plyn - obdobie"
+    initial: "04.09.2024 - 09.09.2025"
+    icon: mdi:file-document
+
+  faktura_plyn_spotreba_kwh:
+    name: "Faktúra plyn - spotreba kWh"
+    initial: "12480"
+    icon: mdi:meter-gas
+
+  faktura_plyn_suma_eur:
+    name: "Faktúra plyn - suma €"
+    initial: "750.67"
+    icon: mdi:currency-eur
+
+  faktura_plyn_vysledok:
+    name: "Faktúra plyn - výsledok"
+    initial: "nedoplatok 260.67 €"
+    icon: mdi:cash
+
+  # --- Posledná faktúra za ELEKTRINU ---
+  faktura_elektrina_obdobie:
+    name: "Faktúra elektrina - obdobie"
+    initial: "10.09.2024 - 01.09.2025"
+    icon: mdi:file-document
+
+  faktura_elektrina_spotreba_kwh:
+    name: "Faktúra elektrina - spotreba kWh"
+    initial: "920"
+    icon: mdi:lightning-bolt
+
+  faktura_elektrina_suma_eur:
+    name: "Faktúra elektrina - suma €"
+    initial: "246.56"
+    icon: mdi:currency-eur
+
+  faktura_elektrina_vysledok:
+    name: "Faktúra elektrina - výsledok"
+    initial: "preplatok 243.44 €"
+    icon: mdi:cash
+
+# =============================================================================
+# Template senzory - odhadované náklady v EUR
+# =============================================================================
+template:
+  - sensor:
+
+      # Plyn - len variabilná zložka (dnes nemá zmysel rátať fixnú)
+      - name: "Plyn dnes €"
+        unique_id: plyn_dnes_eur
+        state: >
+          {{ (states('sensor.plyn_dnes_kwh') | float(0) * states('input_number.cena_plyn_kwh') | float(0.0351)) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+      # Plyn - variabilná + fixná mesačná platba
+      - name: "Plyn tento mesiac €"
+        unique_id: plyn_mesiac_eur
+        state: >
+          {{ ((states('sensor.plyn_mesiac_kwh') | float(0) * states('input_number.cena_plyn_kwh') | float(0.0351))
+              + states('input_number.cena_plyn_fixna_mesiac') | float(1.845)) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+      # Plyn - variabilná + fixná × počet mesiacov v roku
+      - name: "Plyn tento rok €"
+        unique_id: plyn_rok_eur
+        state: >
+          {{ ((states('sensor.plyn_rok_kwh') | float(0) * states('input_number.cena_plyn_kwh') | float(0.0351))
+              + states('input_number.cena_plyn_fixna_mesiac') | float(1.845) * 12) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+      # Nesledovaná spotreba = celkový odber mínus sledované spotrebiče
+      - name: "Nesledovaná spotreba"
+        unique_id: nesleovana_spotreba_w
+        state: >
+          {% set celkom = states('sensor.shellypro3em_2cbcbba643a4_total_active_power') | float(0) %}
+          {% set sledovane = (
+            states('sensor.shellypmminig3_5432045d1f18_power') | float(0) +
+            states('sensor.shellypmminig3_dcda0ce8dd90_power') | float(0) +
+            states('sensor.shellypmminig3_dcda0cb33510_power') | float(0) +
+            states('sensor.shellyplus1pm_b8d61a88ed04_switch_0_power') | float(0) +
+            states('sensor.shellypmminig3_3030f9eb8538_power') | float(0) +
+            states('sensor.shellypmminig3_dcda0ce8bb2c_power') | float(0) +
+            states('sensor.shellypmminig3_dcda0cb1fdd0_power') | float(0)
+          ) %}
+          {{ [celkom - sledovane, 0] | max | round(1) }}
+        unit_of_measurement: "W"
+        icon: mdi:help-circle
+        state_class: measurement
+        device_class: power
+
+      # Elektrina - celková cena vrátane distribúcie (0.268 €/kWh)
+      - name: "Elektrina dnes €"
+        unique_id: elektrina_dnes_eur
+        state: >
+          {{ (states('sensor.elektrina_dnes') | float(0) * states('input_number.cena_elektrina_kwh') | float(0.275)) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+      # Elektrina - celková cena + fixná mesačná platba
+      - name: "Elektrina tento mesiac €"
+        unique_id: elektrina_mesiac_eur
+        state: >
+          {{ ((states('sensor.elektrina_mesiac') | float(0) * states('input_number.cena_elektrina_kwh') | float(0.275))
+              + states('input_number.cena_elektrina_fixna_mesiac') | float(1.785)) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+      # Elektrina - celková cena + fixná × 12 mesiacov
+      - name: "Elektrina tento rok €"
+        unique_id: elektrina_rok_eur
+        state: >
+          {{ ((states('sensor.elektrina_rok') | float(0) * states('input_number.cena_elektrina_kwh') | float(0.275))
+              + states('input_number.cena_elektrina_fixna_mesiac') | float(1.785) * 12) | round(2) }}
+        unit_of_measurement: "€"
+        icon: mdi:currency-eur
+        state_class: measurement
+
+# =============================================================================
+# Automatizácie
+# =============================================================================
+automation:
+
+  # Upozornenie pred blížiacim sa ročným vyúčtovaním (každý rok 1. septembra)
+  - id: upozornenie_vyyctovanie_energie
+    alias: "Energie / Upozornenie na blížiace sa vyúčtovanie"
+    description: "VSE posiela ročné vyúčtovanie vždy okolo 16. septembra"
+    triggers:
+      - trigger: time
+        at: "08:00:00"
+    conditions:
+      - condition: template
+        value_template: >
+          {{ now().month == 9 and now().day == 1 }}
+    actions:
+      - action: notify.mobile_app_jr
+        data:
+          title: "📄 Blíži sa ročné vyúčtovanie energií"
+          message: >
+            VSE zvyčajne posiela vyúčtovanie okolo 16. septembra.
+            Rok: plyn {{ states('sensor.plyn_rok_kwh') }} kWh (~{{ states('sensor.plyn_rok_eur') }} €),
+            elektrina {{ states('sensor.elektrina_rok') }} kWh (~{{ states('sensor.elektrina_rok_eur') }} €).
+      - action: persistent_notification.create
+        data:
+          notification_id: "vyyctovanie_energie"
+          title: "📄 Blíži sa ročné vyúčtovanie energií"
+          message: >
+            VSE zvyčajne posiela vyúčtovanie okolo 16. septembra.
+
+            **Ročná spotreba k dnešnému dňu:**
+            - Plyn: {{ states('sensor.plyn_rok_kwh') }} kWh (~{{ states('sensor.plyn_rok_eur') }} €)
+            - Elektrina: {{ states('sensor.elektrina_rok') }} kWh (~{{ states('sensor.elektrina_rok_eur') }} €)
+
+            _{{ now().strftime('%d.%m.%Y') }}_
+    mode: single
