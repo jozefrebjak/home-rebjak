@@ -29,7 +29,7 @@ Zabudované v Legrand Valena Life rámčeku (zaslepovacia pozícia).
 |-----------|-------|----------|----------|
 | ESP32 doska | M5Stack ATOM Lite | ~8€ | ESP32, WiFi + BLE, USB-C, 24×24mm |
 | AC/DC zdroj | Hi-Link HLK-PM01 | ~4€ | 230V AC → 5V DC, 3W |
-| PIR senzor | AM312 | ~1€ | 2.7-12V, 10×10mm, dosah 3-5m |
+| PIR senzor | **SR602** | ~1€ | 3.3V, 10×23mm, dosah 3m, retriggering |
 | Senzor osvetlenia | BH1750 (voliteľné) | ~2€ | I2C, meranie lux |
 | Rámček | Legrand Valena Life | — | Zaslepovacia pozícia pre PIR |
 
@@ -41,8 +41,19 @@ Zabudované v Legrand Valena Life rámčeku (zaslepovacia pozícia).
 
 ### Náradia
 
-- Spájkovačka + cín (prepojenie Hi-Link → ATOM → AM312)
+- Spájkovačka + cín (prepojenie Hi-Link → ATOM → SR602)
 - Skúšačka / multimeter
+
+### Prečo SR602 (porovnanie zvažovaných senzorov)
+
+| Senzor | Napájanie | Veľkosť | Retriggering | Dosah | Záver |
+|--------|-----------|---------|--------------|-------|-------|
+| HC-SR501 (modrá/zelená) | 5-20V | 32×24mm | áno (nast.) | 3-7m (nast.) | Príliš veľký do krabice |
+| HC-SR505 | 5V | stredný | áno | ~3m | OK, ale 5V |
+| AM312 | 3.3V | 10×10mm | **nie** | ~3m | Bez retriggering — svetlo by blikalo |
+| **SR602** | **3.3V** | **10×23mm** | **áno** | **~3m** | **Ideálny — malý, 3.3V, retriggering** |
+
+**Retriggering** = senzor predlžuje HIGH signál kým je pohyb. Bez toho by svetlo zhasínalo každé 2s a znova svietilo — čo nie je použiteľné.
 
 ---
 
@@ -103,9 +114,9 @@ Fáza + nulák sa berú z rovnakého prívodu ako svetlo.
 |-------|------|-----|
 | Hi-Link +Vo (5V) | ATOM Lite | 5V |
 | Hi-Link -Vo (GND) | ATOM Lite | GND |
-| ATOM Lite 3.3V | AM312 | VCC |
-| ATOM Lite GND | AM312 | GND |
-| AM312 OUT | ATOM Lite | GPIO32 |
+| ATOM Lite 3.3V | SR602 | VCC |
+| ATOM Lite GND | SR602 | GND |
+| SR602 OUT | ATOM Lite | GPIO32 |
 | ATOM Lite GPIO25 (voliteľné) | BH1750 SDA | SDA |
 | ATOM Lite GPIO21 (voliteľné) | BH1750 SCL | SCL |
 
