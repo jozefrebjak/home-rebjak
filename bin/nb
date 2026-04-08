@@ -1,0 +1,279 @@
+#!/bin/bash
+# NetBox API CLI tool
+
+set -e
+
+NETBOX_URL="https://imzu1574.cloud.netboxapp.com"
+
+# Find and load .env file
+load_env() {
+    local env_files=(
+        "${HA_ENV_FILE:-}"
+        "/config/.env"
+        "/homeassistant/.env"
+        "./.env"
+        "$HOME/.ha-cli.env"
+    )
+
+    for f in "${env_files[@]}"; do
+        if [[ -n "$f" && -f "$f" ]]; then
+            source "$f"
+            return 0
+        fi
+    done
+
+    if [[ -n "${NETBOX_TOKEN:-}" ]]; then
+        return 0
+    fi
+
+    echo "Error: No .env file found and NETBOX_TOKEN not set" >&2
+    exit 1
+}
+
+load_env
+
+api_get() {
+    curl -sk \
+        -H "Authorization: Bearer $NETBOX_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        "$NETBOX_URL/api/$1"
+}
+
+api_post() {
+    curl -sk -X POST \
+        -H "Authorization: Bearer $NETBOX_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -d "$2" \
+        "$NETBOX_URL/api/$1"
+}
+
+api_patch() {
+    curl -sk -X PATCH \
+        -H "Authorization: Bearer $NETBOX_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: application/json" \
+        -d "$2" \
+        "$NETBOX_URL/api/$1"
+}
+
+api_delete() {
+    curl -sk -X DELETE \
+        -H "Authorization: Bearer $NETBOX_TOKEN" \
+        "$NETBOX_URL/api/$1"
+}
+
+usage() {
+    cat <<EOF
+Usage: nb <command> [options]
+
+Status:
+  status                        Check NetBox API status
+
+IP Address Management (IPAM):
+  ip list [filter]              List IP addresses (optional search filter)
+  ip get <address>              Get IP address details (e.g. 192.168.1.1)
+  ip add <address/prefix> [description] [--dns <fqdn>] [--device <name>]
+                                Add IP address (e.g. 192.168.1.100/24)
+  ip update <id> [key=value...] Update IP address fields
+  ip delete <id>                Delete IP address
+
+  prefix list [filter]          List prefixes
+  prefix add <prefix> [description]
+                                Add prefix (e.g. 192.168.1.0/24)
+
+Devices:
+  device list [filter]          List devices
+  device get <name|id>          Get device details
+  device add <name> --role <role> --site <site> [--ip <address>]
+                                Add a device
+
+VMs:
+  vm list [filter]              List virtual machines
+  vm get <name|id>              Get VM details
+
+Generic:
+  get <endpoint>                GET any API endpoint
+  post <endpoint> <json>        POST to any API endpoint
+
+Examples:
+  nb status
+  nb ip list
+  nb ip list 192.168
+  nb ip add 192.168.1.10/24 "Raspberry Pi" --dns rpi.lan
+  nb ip get 192.168.1.10
+  nb prefix list
+  nb device list
+  nb get ipam/ip-addresses/?limit=10
+EOF
+    exit 1
+}
+
+# Parse key=value args into JSON
+kv_to_json() {
+    local json="{"
+    local first=1
+    for arg in "$@"; do
+        local key="${arg%%=*}"
+        local val="${arg#*=}"
+        [[ "$first" -eq 0 ]] && json+=","
+        first=0
+        # Detect booleans and numbers
+        if [[ "$val" =~ ^(true|false)$ ]]; then
+            json+="\"$key\":$val"
+        elif [[ "$val" =~ ^[0-9]+$ ]]; then
+            json+="\"$key\":$val"
+        elif [[ "$val" == "null" || "$val" == "none" ]]; then
+            json+="\"$key\":null"
+        else
+            json+="\"$key\":\"$val\""
+        fi
+    done
+    json+="}"
+    echo "$json"
+}
+
+case "${1:-}" in
+    status)
+        api_get "status/" | jq '.'
+        ;;
+
+    # --- IP ---
+    ip)
+        case "${2:-}" in
+            list)
+                filter="${3:-}"
+                if [[ -n "$filter" ]]; then
+                    api_get "ipam/ip-addresses/?q=$filter&limit=100" | jq -r '.results[] | "\(.id)\t\(.address)\t\(.dns_name // "")\t\(.description // "")"'
+                else
+                    api_get "ipam/ip-addresses/?limit=200" | jq -r '.results[] | "\(.id)\t\(.address)\t\(.dns_name // "")\t\(.description // "")"'
+                fi
+                ;;
+            get)
+                [ -z "${3:-}" ] && usage
+                addr="${3//\//%2F}"
+                api_get "ipam/ip-addresses/?address=$addr" | jq '.results[]'
+                ;;
+            add)
+                [ -z "${3:-}" ] && usage
+                address="$3"
+                description="${4:-}"
+                dns=""
+                # Parse optional flags
+                shift 4 2>/dev/null || shift $#
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        --dns) dns="$2"; shift 2 ;;
+                        *) shift ;;
+                    esac
+                done
+                json="{\"address\":\"$address\""
+                [[ -n "$description" ]] && json+=",\"description\":\"$description\""
+                [[ -n "$dns" ]] && json+=",\"dns_name\":\"$dns\""
+                json+="}"
+                api_post "ipam/ip-addresses/" "$json" | jq '.'
+                ;;
+            update)
+                [ -z "${3:-}" ] && usage
+                id="$3"; shift 3
+                json=$(kv_to_json "$@")
+                api_patch "ipam/ip-addresses/$id/" "$json" | jq '.'
+                ;;
+            delete)
+                [ -z "${3:-}" ] && usage
+                api_delete "ipam/ip-addresses/$3/"
+                echo "Deleted IP $3"
+                ;;
+            *)
+                usage ;;
+        esac
+        ;;
+
+    # --- Prefix ---
+    prefix)
+        case "${2:-}" in
+            list)
+                filter="${3:-}"
+                if [[ -n "$filter" ]]; then
+                    api_get "ipam/prefixes/?q=$filter&limit=100" | jq -r '.results[] | "\(.id)\t\(.prefix)\t\(.description // "")"'
+                else
+                    api_get "ipam/prefixes/?limit=200" | jq -r '.results[] | "\(.id)\t\(.prefix)\t\(.description // "")"'
+                fi
+                ;;
+            add)
+                [ -z "${3:-}" ] && usage
+                prefix="$3"
+                description="${4:-}"
+                json="{\"prefix\":\"$prefix\""
+                [[ -n "$description" ]] && json+=",\"description\":\"$description\""
+                json+="}"
+                api_post "ipam/prefixes/" "$json" | jq '.'
+                ;;
+            *)
+                usage ;;
+        esac
+        ;;
+
+    # --- Devices ---
+    device)
+        case "${2:-}" in
+            list)
+                filter="${3:-}"
+                if [[ -n "$filter" ]]; then
+                    api_get "dcim/devices/?q=$filter&limit=100" | jq -r '.results[] | "\(.id)\t\(.name)\t\(.device_role.name // "")\t\(.primary_ip.address // "")"'
+                else
+                    api_get "dcim/devices/?limit=200" | jq -r '.results[] | "\(.id)\t\(.name)\t\(.device_role.name // "")\t\(.primary_ip.address // "")"'
+                fi
+                ;;
+            get)
+                [ -z "${3:-}" ] && usage
+                if [[ "$3" =~ ^[0-9]+$ ]]; then
+                    api_get "dcim/devices/$3/" | jq '.'
+                else
+                    api_get "dcim/devices/?name=$3" | jq '.results[]'
+                fi
+                ;;
+            *)
+                usage ;;
+        esac
+        ;;
+
+    # --- VMs ---
+    vm)
+        case "${2:-}" in
+            list)
+                filter="${3:-}"
+                if [[ -n "$filter" ]]; then
+                    api_get "virtualization/virtual-machines/?q=$filter&limit=100" | jq -r '.results[] | "\(.id)\t\(.name)\t\(.primary_ip.address // "")"'
+                else
+                    api_get "virtualization/virtual-machines/?limit=200" | jq -r '.results[] | "\(.id)\t\(.name)\t\(.primary_ip.address // "")"'
+                fi
+                ;;
+            get)
+                [ -z "${3:-}" ] && usage
+                if [[ "$3" =~ ^[0-9]+$ ]]; then
+                    api_get "virtualization/virtual-machines/$3/" | jq '.'
+                else
+                    api_get "virtualization/virtual-machines/?name=$3" | jq '.results[]'
+                fi
+                ;;
+            *)
+                usage ;;
+        esac
+        ;;
+
+    # --- Generic ---
+    get)
+        [ -z "${2:-}" ] && usage
+        api_get "$2" | jq '.'
+        ;;
+    post)
+        [ -z "${2:-}" ] || [ -z "${3:-}" ] && usage
+        api_post "$2" "$3" | jq '.'
+        ;;
+
+    *)
+        usage
+        ;;
+esac
