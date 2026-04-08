@@ -28,7 +28,7 @@ Zabudované v Legrand Valena Life rámčeku (zaslepovacia pozícia).
 | Komponent | Model | Cena (~) | Poznámka |
 |-----------|-------|----------|----------|
 | ESP32 doska | M5Stack ATOM Lite | ~8€ | ESP32, WiFi + BLE, USB-C, 24×24mm |
-| AC/DC zdroj | Hi-Link HLK-PM01 | ~4€ | 230V AC → 5V DC, 3W |
+| AC/DC zdroj | Hi-Link HLK-5M03 | ~5€ | 230V AC → 3.3V DC, 5W |
 | PIR senzor | **SR602** | ~1€ | 3.3V, 10×23mm, dosah 3m, retriggering |
 | Senzor osvetlenia | BH1750 (voliteľné) | ~2€ | I2C, meranie lux |
 | Rámček | Legrand Valena Life | — | Zaslepovacia pozícia pre PIR |
